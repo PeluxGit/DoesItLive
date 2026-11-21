@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: DoesItLive
+## Notes: Shows the healing your own HoTs still have to do as a block on party and raid frame health bars (/dil).
+## Author: Pelux
+## Version: 0.3.0-proto
+## SavedVariables: DoesItLiveDB
+## X-Credits: Marker styles, textures, options window and damage meter learning adapted from DoesItDie by Joe Greive (MIT, LICENSE-DoesItDie.txt)
+
+Config.lua
+Core.lua
+Meter.lua
+Display.lua
+Frames.lua
+Nameplates.lua
+Options.lua
+Slash.lua
