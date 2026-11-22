@@ -6,6 +6,7 @@
 ## SavedVariables: DoesItLiveDB
 ## Category: User Interface
 ## X-Website: https://github.com/PeluxGit/DoesItLive
+## X-Curse-Project-ID: 1824233
 ## X-Credits: Marker styles, textures, options window and nameplate support adapted from DoesItDie by Joe Greive (MIT, LICENSE-DoesItDie.txt)
 
 src/config.lua
