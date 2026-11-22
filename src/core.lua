@@ -1,20 +1,21 @@
 local addonName, ns = ...
 
--- Tracks your own HoTs per group member and answers "how much healing is left on this unit".
+-- Tracks your own HoTs per unit and answers "how much healing is left on this unit".
 --
--- What Forever lets addons read (DoesItDie's findings, confirmed in game for this addon):
+-- What Forever lets addons read:
 --   readable: your own cast events (SENT names the target by full name, SUCCEEDED gives the spell),
---             spell descriptions, your stats out of combat, your own auras out of combat.
---   secret:   unit health and max health, incoming heals (fine: they only go into StatusBars).
---   blocked:  auras in combat. Even a pcall'd read taints the addon, so it never reads them in combat.
+--             spell descriptions, max health out of combat, your own auras out of combat,
+--             the timing of heals on units (UNIT_COMBAT).
+--   secret:   max health in combat, incoming heals, heal amounts (only ever passed to StatusBars),
+--             aura updates in combat.
+--   blocked:  reading auras in combat: even a pcall'd read taints the addon.
 
 local issecret = issecretvalue or function() return false end
 local GetTime = GetTime
 
 ns.hots = {}             -- [unitKey] = { [spellName] = hot }
-local pendingTarget = {} -- [castGUID] = target name from UNIT_SPELLCAST_SENT
-local parsed = {}        -- [spellID] = info, or false (not a HoT)
-local bonusHealing = 0   -- cached out of combat
+local pendingTarget = {} -- [castGUID] = { name = target name from UNIT_SPELLCAST_SENT, time = sent at }
+local parsed = {}        -- [spellID] = info from the last readable tooltip, or false (not a HoT)
 
 local function trace(msg)
     if ns.db and ns.db.debug then print("|cff40d090DIL|r " .. msg) end
@@ -25,9 +26,8 @@ ns.trace = trace
 -- Units
 ---------------------------------------------------------------------------
 
--- Stable key for a group member: the full name as cast events report it. On Forever that's
--- "First Last" (GetUnitName(unit, true); UnitName returns the last name where the realm usually is).
--- Falls back to "Name-Realm" or "Name". nil when the name is secret.
+-- Key for a unit: the full name as cast events report it, "First Last" on Forever (UnitName returns the
+-- last name where the realm usually is). Falls back to "Name-Realm" or "Name"; nil when the name is secret.
 function ns.unitKey(unit)
     if not unit or not UnitExists(unit) then return nil end
     if GetUnitName then
@@ -52,14 +52,23 @@ end
 
 local function plain(v) return v ~= nil and not issecret(v) end
 
+local function sameUnit(a, b)
+    local ok, same = pcall(UnitIsUnit, a, b)
+    return ok and plain(same) and same
+end
+
+local function inMyGroup(unit)
+    local ok, inGroup = pcall(function()
+        return UnitIsUnit(unit, "player") or UnitInParty(unit) or UnitInRaid(unit) ~= nil
+    end)
+    return ok and plain(inGroup) and inGroup
+end
+
 -- The units a party-wide HoT lands on: the whole party, or the target's subgroup in a raid.
 -- Dead players are left out, and players the game reports out of your range when it says so.
 local function partyOf(unit)
     local members = {}
-    local okGroup, inGroup = pcall(function()
-        return UnitIsUnit(unit, "player") or UnitInParty(unit) or UnitInRaid(unit) ~= nil
-    end)
-    if not okGroup or not plain(inGroup) or not inGroup then return { unit } end -- outside your group: just them
+    if not inMyGroup(unit) then return { unit } end -- outside your group: just them
     local function add(u)
         local okDead, dead = pcall(UnitIsDeadOrGhost, u)
         if okDead and plain(dead) and dead then return end
@@ -72,8 +81,7 @@ local function partyOf(unit)
     if IsInRaid() then
         local group
         for i = 1, GetNumGroupMembers() do
-            local ok, same = pcall(UnitIsUnit, "raid" .. i, unit)
-            if ok and plain(same) and same then group = select(3, GetRaidRosterInfo(i)) break end
+            if sameUnit("raid" .. i, unit) then group = select(3, GetRaidRosterInfo(i)) break end
         end
         for i = 1, GetNumGroupMembers() do
             if not group or select(3, GetRaidRosterInfo(i)) == group then add("raid" .. i) end
@@ -93,10 +101,7 @@ local function startsWithName(targetName, key)
     return targetName:sub(1, #first) == first and (nextChar == "" or nextChar == " " or nextChar == "-")
 end
 
--- The group member a cast went to. SENT gives the full name ("Daft Druid"), or nothing for
--- self/auto self-cast. Exact full-name matches win; the first-name match is the fallback; the
--- friendly target, then yourself, when SENT names nobody.
--- Friendly units outside the group a HoT can go to and a frame can show: target, focus, mouseover.
+-- Friendly units outside the group a HoT can go to.
 local SINGLE_CANDIDATES = { "target", "focus", "mouseover" }
 
 local function friendly(unit)
@@ -105,6 +110,8 @@ local function friendly(unit)
     return ok and plain(isFriend) and isFriend
 end
 
+-- The unit a cast went to: an exact full-name match, else a first-name match. When SENT names nobody,
+-- the friendly target, else yourself.
 local function resolveCastUnit(targetName)
     if targetName and not issecret(targetName) and targetName ~= "" then
         local candidates = ns.groupUnits()
@@ -172,15 +179,18 @@ local function tickWeights(ticks, shape)
     return weights
 end
 
+-- Read on every cast; the last readable tooltip stands in when it can't be read.
 local function hotInfo(spellID)
-    if parsed[spellID] ~= nil then return parsed[spellID] or nil end
+    local cached = parsed[spellID]
+    if cached == false then return nil end
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
     if not name and GetSpellInfo then name = GetSpellInfo(spellID) end
     local descFn = (C_Spell and C_Spell.GetSpellDescription) or GetSpellDescription
     local desc = descFn and descFn(spellID)
-    if not name or not desc or desc == "" or issecret(desc) then
-        return nil -- not loaded yet: try again next cast (not a HoT is the usual case, so no trace)
+    if not name or not desc or issecret(desc) or desc == "" then
+        return cached
     end
+    if cached and cached.desc == desc then return cached end
     local amount, duration, direct, party = ns.parseHot(desc)
     local override = ns.SPELLS[name] or {}
     if not amount or override.skip then
@@ -190,10 +200,9 @@ local function hotInfo(spellID)
     local tick = override.tick or ns.DEFAULT_TICK
     local ticks = math.max(1, math.floor(duration / tick + 0.5))
     local info = {
-        name = name, spellID = spellID, amount = amount, duration = duration, direct = direct,
-        party = party or override.party, tick = tick, ticks = ticks,
+        name = name, spellID = spellID, desc = desc, amount = amount, duration = duration, direct = direct,
+        party = party or override.party, tick = tick, ticks = ticks, school = override.school,
         weights = tickWeights(ticks, override.shape),
-        coef = override.coef or math.min(duration / 15, 1),
     }
     parsed[spellID] = info
     trace(("parsed %s (%d): %d over %ss in %d ticks%s%s"):format(name, spellID, amount, duration, ticks,
@@ -202,40 +211,46 @@ local function hotInfo(spellID)
 end
 ns.hotInfo = hotInfo
 
-function ns.cacheBonusHealing()
-    if InCombatLockdown() or not GetSpellBonusHealing then return end
-    local ok, value = pcall(GetSpellBonusHealing)
-    if ok and plain(value) then bonusHealing = value end
-end
-function ns.bonusHealing() return bonusHealing end
+---------------------------------------------------------------------------
+-- Crit chance
+---------------------------------------------------------------------------
+-- Read out of combat only; in combat the last reading is used.
 
--- Average healing per tick for a new cast: the damage meter's learned size when there is one,
--- else the tooltip plus +healing x coefficient. Then the scale setting.
-function ns.averageTick(info)
-    local learned = ns.db.learned[info.spellID]
-    local avg
-    if learned and learned.tick then
-        avg = learned.tick
-    else
-        local total = info.amount
-        if ns.db.useBonusHealing then total = total + bonusHealing * info.coef end
-        avg = total / info.ticks
+local critBySchool = {} -- [school] = crit chance in %
+
+local function readCrit()
+    if InCombatLockdown() or UnitAffectingCombat("player") or not GetSpellCritChance then return end
+    local changed = {}
+    for school = 2, 7 do
+        local ok, value = pcall(GetSpellCritChance, school)
+        if ok and plain(value) and type(value) == "number" and value ~= critBySchool[school] then
+            critBySchool[school] = value
+            changed[#changed + 1] = ("%d: %.2f%%"):format(school, value)
+        end
     end
-    return avg * (ns.db.scale / 100)
+    if #changed > 0 then trace("crit chance by school, " .. table.concat(changed, ", ")) end
+end
+ns.readCrit = readCrit
+
+-- Crit chance (0 to 1) for a spell: its school's, else the highest known. nil when never read.
+function ns.critChance(info)
+    local value = info and info.school and critBySchool[info.school]
+    if not value then
+        for _, v in pairs(critBySchool) do value = math.max(value or 0, v) end
+    end
+    return value and value / 100
+end
+
+function ns.averageTick(info)
+    local tick = info.amount / info.ticks
+    local crit = ns.db.includeCrits and ns.critChance(info)
+    if crit then tick = tick * (1 + crit * (ns.CRIT_MULTIPLIER - 1)) end
+    return tick * (ns.db.scale / 100)
 end
 
 ---------------------------------------------------------------------------
 -- Tracking
 ---------------------------------------------------------------------------
-
--- Every application, kept a while for the damage meter tally after combat (Meter.lua).
-ns.apps = {}
-ns.castLog = {}      -- { spellID, time } of casts with an upfront heal
-ns.untracked = {}    -- [spellID] = time of a cast that went to nobody in the group
-
-local function endApp(hot, now)
-    if hot and hot.app and not hot.app.ended then hot.app.ended = now end
-end
 
 local function apply(unit, info, now)
     local key = ns.unitKey(unit)
@@ -248,34 +263,38 @@ local function apply(unit, info, now)
     for k = 1, info.ticks do amounts[k] = avg * info.weights[k] end
     ns.hots[key] = ns.hots[key] or {}
     local old = ns.hots[key][info.name]
-    if old then endApp(old, now) serial = old.serial end
-    -- A recast replaces the old one (these HoTs refresh, they don't stack).
-    local app = { spellID = info.spellID, info = info, start = now }
-    ns.apps[#ns.apps + 1] = app
+    if old then serial = old.serial end
+    -- HoTs refresh rather than stack: a recast replaces the old one.
     ns.hots[key][info.name] = {
         name = info.name, spellID = info.spellID, interval = info.tick, ticks = info.ticks, amounts = amounts,
-        expires = now + info.duration, duration = info.duration, app = app, serial = serial,
+        expires = now + info.duration, duration = info.duration, serial = serial,
+        nextTick = 1, seen = 0, -- next tick index to expect, ticks seen landing
     }
     trace(("%s on %s (%s): %.0f per tick"):format(info.name, key, unit, avg))
     if ns.onApplied then ns.onApplied(key) end
 end
 
+-- Casts that fail or get interrupted never reach SUCCEEDED: their entries are dropped after this long.
+local PENDING_SECONDS = 30
+
 function ns.onCastSent(targetName, castGUID)
-    if castGUID then pendingTarget[castGUID] = targetName or "" end
+    if not castGUID then return end
+    local cutoff = GetTime() - PENDING_SECONDS
+    for guid, pending in pairs(pendingTarget) do
+        if pending.time < cutoff then pendingTarget[guid] = nil end
+    end
+    pendingTarget[castGUID] = { name = targetName or "", time = GetTime() }
 end
 
 function ns.onCastSucceeded(castGUID, spellID)
-    local targetName = castGUID and pendingTarget[castGUID]
+    local pending = castGUID and pendingTarget[castGUID]
+    local targetName = pending and pending.name
     if castGUID then pendingTarget[castGUID] = nil end
     local info = hotInfo(spellID)
     if not info then return end
     local now = GetTime()
     local unit = resolveCastUnit(targetName)
-    if not unit then
-        ns.untracked[spellID] = now
-        return
-    end
-    if info.direct > 0 then ns.castLog[#ns.castLog + 1] = { spellID = spellID, time = now } end
+    if not unit then return end
     if info.party then
         for _, member in ipairs(partyOf(unit)) do apply(member, info, now) end
     else
@@ -284,17 +303,22 @@ function ns.onCastSucceeded(castGUID, spellID)
     ns.startTicker()
 end
 
--- Refinement from auras, out of combat only: in combat Forever makes them secret, and even a pcall'd
--- read taints the addon. Any error turns reads off until combat ends, as a safety net.
+-- Aura reads correct expiries and catch removals, out of combat only (in combat they taint). An error turns
+-- them off until combat ends.
 local auraBlocked = false
 function ns.unblockAuras() auraBlocked = false end
 
 local function inCombat() return InCombatLockdown() or UnitAffectingCombat("player") end
 ns.inCombat = inCombat
 
-local function auraScan(unit, byName)
+local auraScannedAt = {} -- [unitKey] = GetTime() of the last read
+
+local function auraScan(unit, key, byName)
     if auraBlocked or inCombat() then return end
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
+    local last = auraScannedAt[key]
+    if last and GetTime() - last < ns.AURA_RESCAN then return end
+    auraScannedAt[key] = GetTime()
     local seen = {}
     for i = 1, 40 do
         local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL|PLAYER")
@@ -308,26 +332,23 @@ local function auraScan(unit, byName)
         if issecret(name) or issecret(expires) then return end
         seen[name] = expires
     end
-    local now = GetTime()
     for name, hot in pairs(byName) do
         local expires = seen[name]
         if expires and expires > 0 then
             hot.expires, hot.auraSeen = expires, true
         elseif hot.auraSeen then
-            endApp(hot, now)
-            byName[name] = nil -- confirmed earlier, cleanly absent now: dispelled or cancelled
+            byName[name] = nil -- seen before, gone now: dispelled or cancelled
         end
     end
 end
 
--- Ticks still to land, from the expiry (which the aura scan can correct).
 local function ticksLeft(hot, now)
     local left = hot.expires - now
     if left <= 0 then return 0, 0 end
     return math.max(0, math.min(hot.ticks, math.ceil(left / hot.interval - 0.05))), left
 end
 
--- Healing still to come from one HoT. Smooth drain eats into the next tick as it approaches.
+-- Smooth drain eats into the next tick as it approaches.
 local function remainingOf(hot, now, smooth)
     local n, left = ticksLeft(hot, now)
     if n ~= hot.lastLeft then
@@ -346,23 +367,89 @@ local function remainingOf(hot, now, smooth)
     return total
 end
 
--- total (plain number), parts ({ name, amount } in a stable order), tickSerial (goes up as ticks land).
-function ns.remainingFor(unit)
+---------------------------------------------------------------------------
+-- Tick matching
+---------------------------------------------------------------------------
+-- UNIT_COMBAT reports each heal on a unit with readable timing, but no amount or spell. A heal close to a HoT's
+-- due tick is taken as that tick. Once a HoT's tick has been seen, a due tick with no heal means it was
+-- dispelled or cancelled.
+
+local function dueAt(hot, k) return hot.expires - (hot.ticks - k) * hot.interval end
+
+-- One token per person, so a heal isn't counted twice: group tokens for the group, target or focus for
+-- anyone else. Returns accept, isGroupToken.
+local function healToken(unit)
+    if unit == "player" then return true, true end
+    if unit:find("^raid%d") then return IsInRaid() and not sameUnit(unit, "player"), true end
+    if unit:find("^party%d") then return not IsInRaid(), true end
+    if unit == "target" then return not inMyGroup(unit), false end
+    if unit == "focus" then return not inMyGroup(unit) and not sameUnit("focus", "target"), false end
+    return false
+end
+
+function ns.onHeal(unit)
+    if not next(ns.hots) or type(unit) ~= "string" or issecret(unit) then return end
+    local accept, group = healToken(unit)
+    if not accept then return end
     local key = ns.unitKey(unit)
+    local byName = key and ns.hots[key]
+    if not byName then return end
+    local now, window = GetTime(), ns.TICK_WINDOW
+    local best, bestName, bestK, bestOff
+    for name, hot in pairs(byName) do
+        for k = hot.nextTick, hot.ticks do
+            local off = now - dueAt(hot, k)
+            if off < -window then break end -- later ticks are further off still
+            if off <= window and (not best or math.abs(off) < math.abs(bestOff)) then
+                best, bestName, bestK, bestOff = hot, name, k, off
+            end
+        end
+    end
+    if not best then return end
+    best.nextTick, best.seen = bestK + 1, best.seen + 1
+    -- Target and focus can change, so only HoTs heard through group tokens are judged for missed ticks.
+    best.heardInGroup = group
+    local synced = math.abs(bestOff) <= ns.TICK_SYNC_WINDOW and not best.auraSeen
+    if synced then best.expires = best.expires + bestOff end
+    trace(("TICK %s on %s (%d/%d, %+.2fs%s)"):format(bestName, key, bestK, best.ticks, bestOff,
+        synced and ", synced" or ""))
+end
+
+-- True when the HoT's next tick is overdue, meaning it's gone.
+local function missedTick(hot, unit, name, key, now)
+    if hot.seen == 0 or not hot.heardInGroup or hot.nextTick > hot.ticks then return false end
+    local due = dueAt(hot, hot.nextTick)
+    -- After a hitch, wait a frame: the heal may be in events not handled yet.
+    local sinceLast = now - (hot.missCheckedAt or now)
+    hot.missCheckedAt = now
+    if sinceLast > 0.25 then return false end
+    if now <= due + ns.TICK_MISS_AFTER then return false end
+    -- Out of sight, the game may not send heals at all.
+    local okVisible, visible = pcall(UnitIsVisible, unit)
+    if not (okVisible and plain(visible) and visible) then
+        hot.nextTick = hot.nextTick + 1
+        return false
+    end
+    trace(("MISS %s on %s: tick %d/%d didn't land, removed"):format(name, key, hot.nextTick, hot.ticks))
+    return true
+end
+
+-- total (plain number), parts ({ name, amount } in a stable order), tickSerial (goes up as ticks land).
+-- key: the unit's key when the caller already has it.
+function ns.remainingFor(unit, key)
+    key = key or ns.unitKey(unit)
     local byName = key and ns.hots[key]
     if not byName then return 0 end
     local okDead, dead = pcall(UnitIsDeadOrGhost, unit)
     if okDead and plain(dead) and dead then
-        local now = GetTime()
-        for _, hot in pairs(byName) do endApp(hot, now) end
         ns.hots[key] = nil
         return 0
     end
-    auraScan(unit, byName)
+    auraScan(unit, key, byName)
     local now, total, parts, serial = GetTime(), 0, {}, 0
     local smooth = ns.db.drain == "smooth"
     for name, hot in pairs(byName) do
-        local amount = remainingOf(hot, now, smooth)
+        local amount = missedTick(hot, unit, name, key, now) and 0 or remainingOf(hot, now, smooth)
         serial = serial + hot.serial
         if amount <= 0 then
             byName[name] = nil
@@ -388,34 +475,41 @@ function ns.anyActive()
     return next(ns.hots) ~= nil
 end
 
--- Old applications and casts aren't needed once no fight can still count them.
-local KEEP_SECONDS = 120
-function ns.pruneLogs()
-    if inCombat() then return end
-    local cutoff = GetTime() - KEEP_SECONDS
-    local apps = {}
-    for _, app in ipairs(ns.apps) do
-        if (app.ended or (app.start + app.info.duration)) > cutoff then apps[#apps + 1] = app end
-    end
-    ns.apps = apps
-    local casts = {}
-    for _, c in ipairs(ns.castLog) do if c.time > cutoff then casts[#casts + 1] = c end end
-    ns.castLog = casts
-    for id, t in pairs(ns.untracked) do if t <= cutoff then ns.untracked[id] = nil end end
-end
-
 ---------------------------------------------------------------------------
 -- Ticker and events
 ---------------------------------------------------------------------------
 
-local ticker
+local ticker, tickerRate
+local function refreshRate() return ns.db.drain == "smooth" and ns.REFRESH_SMOOTH or ns.REFRESH_TICKS end
+
 function ns.startTicker()
     if ticker then return end
-    ticker = C_Timer.NewTicker(ns.REFRESH, function()
+    tickerRate = refreshRate()
+    ticker = C_Timer.NewTicker(tickerRate, function()
         ns.redraw()
         if not ns.anyActive() and not ns.testMode then ticker:Cancel() ticker = nil ns.redraw() end
     end)
     ns.redraw()
+end
+
+function ns.updateTickerRate()
+    if ticker and tickerRate ~= refreshRate() then
+        ticker:Cancel()
+        ticker = nil
+        ns.startTicker()
+    end
+end
+
+-- Frame addons may build their buttons just after the event: look again a moment later (once per burst).
+local rescanPending = false
+local function rescanNowAndSoon()
+    ns.rescan()
+    if rescanPending then return end
+    rescanPending = true
+    C_Timer.After(1, function()
+        rescanPending = false
+        ns.rescan()
+    end)
 end
 
 local function copyDefault(v)
@@ -428,41 +522,56 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
-events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("GROUP_ROSTER_UPDATE")
+events:RegisterEvent("PLAYER_ENTERING_WORLD")
 events:RegisterUnitEvent("UNIT_SPELLCAST_SENT", "player")
 events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+events:RegisterEvent("UNIT_COMBAT")
+
+-- What can change crit chance. Some may not exist on this client.
+local CRIT_EVENTS = {
+    "PLAYER_EQUIPMENT_CHANGED", "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE",
+    "ACTIVE_TALENT_GROUP_CHANGED", "PLAYER_SPECIALIZATION_CHANGED",
+}
+local isCritEvent = {}
+for _, name in ipairs(CRIT_EVENTS) do
+    if pcall(events.RegisterEvent, events, name) then isCritEvent[name] = true end
+end
+events:RegisterUnitEvent("UNIT_AURA", "player")
 events:SetScript("OnEvent", function(_, event, ...)
     if event == "ADDON_LOADED" then
         if ... ~= addonName then return end
         DoesItLiveDB = DoesItLiveDB or {}
         local db = DoesItLiveDB
-        if type(db.scale) == "number" and db.scale < 10 then db.scale = math.floor(db.scale * 100 + 0.5) end -- 0.1.0 stored a factor
-        db.color = nil -- 0.1.0's color table, replaced by fillColor
+        -- Settings from older versions.
+        if type(db.scale) == "number" and db.scale < 10 then db.scale = math.floor(db.scale * 100 + 0.5) end
+        db.color, db.useBonusHealing, db.learnFromMeter, db.learned = nil, nil, nil, nil
         for k, v in pairs(ns.DEFAULTS) do
             if db[k] == nil then db[k] = copyDefault(v) end
         end
         ns.db = db
         if ns.registerOptions then ns.registerOptions() end
     elseif event == "PLAYER_LOGIN" then
-        ns.cacheBonusHealing()
-        ns.rescan()
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        ns.combatStart = GetTime()
+        readCrit()
+        rescanNowAndSoon()
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "GROUP_ROSTER_UPDATE" then
+        rescanNowAndSoon()
     elseif event == "PLAYER_REGEN_ENABLED" then
         ns.unblockAuras()
-        ns.cacheBonusHealing()
-        if ns.learnAfterCombat and ns.combatStart then ns.learnAfterCombat(ns.combatStart, GetTime()) end
-        ns.combatStart = nil
+        readCrit()
+        C_Timer.After(1, readCrit) -- the game may still report combat for a moment
         ns.rescan()
-    elseif event == "GROUP_ROSTER_UPDATE" then
-        ns.rescan()
+    elseif event == "UNIT_AURA" or isCritEvent[event] then
+        readCrit()
     elseif event == "UNIT_SPELLCAST_SENT" then
         local _, targetName, castGUID = ...
         if ns.db.enabled then ns.onCastSent(targetName, castGUID) end
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local _, castGUID, spellID = ...
         if ns.db.enabled then ns.onCastSucceeded(castGUID, spellID) end
+    elseif event == "UNIT_COMBAT" then
+        local unit, action = ...
+        if ns.db and ns.db.enabled and not issecret(action) and action == "HEAL" then ns.onHeal(unit) end
     end
 end)

@@ -1,9 +1,6 @@
 local _, ns = ...
 
--- Finds health bars in supported frame addons and puts a HoT block (Display.lua) on each:
---   EllesmereUI raid, party, player, target and focus frames; Blizzard's compact party/raid frames, default
---   party frames, player, target and focus frames (BetterBlizzFrames' bars when it's on); ElvUI and other oUF
---   layouts. Friendly nameplates are in Nameplates.lua.
+-- Finds health bars in frame addons and puts a HoT block on each. Nameplates are in nameplates.lua.
 
 local issecret = issecretvalue or function() return false end
 
@@ -12,7 +9,6 @@ ns.testMode = false
 
 local SINGLE_UNITS = { player = true, target = true, focus = true }
 
--- Units a block can be drawn for: you, your target and focus, group members and friendly nameplates.
 local function isShownUnit(unit)
     return type(unit) == "string" and not issecret(unit)
         and (SINGLE_UNITS[unit] or unit:find("^party%d") or unit:find("^raid%d") or unit:find("^nameplate%d"))
@@ -25,7 +21,7 @@ local function fillsLeftToRight(bar)
     return (not okO or orient ~= "VERTICAL") and (not okR or not reverse)
 end
 
-local skipped = setmetatable({}, { __mode = "k" }) -- bars already reported as not fillable, so it's said once
+local skipped = setmetatable({}, { __mode = "k" }) -- bars already reported as skipped
 
 function ns.track(bar, getUnit, source)
     local o = ns.overlays[bar]
@@ -56,15 +52,22 @@ local function euiHealthBar(button)
     for _, child in ipairs({ button:GetChildren() }) do
         if child:IsObjectType("StatusBar") then
             local h = child:GetHeight()
-            if h and (not bestH or h > bestH) then best, bestH = child, h end
+            if h and not issecret(h) and (not bestH or h > bestH) then best, bestH = child, h end
         end
     end
-    return best
+    return best, bestH
 end
 
+-- Each button's health bar, kept once it has a height (before layout, the power bar can look as tall).
+local euiBars = setmetatable({}, { __mode = "k" })
+
 local function euiButton(button)
-    local bar = euiHealthBar(button)
-    if bar then track(bar, function() return button:GetAttribute("unit") end, "EllesmereUI") end
+    if euiBars[button] then return end
+    local bar, height = euiHealthBar(button)
+    if bar then
+        if height > 0 then euiBars[button] = bar end
+        track(bar, function() return button:GetAttribute("unit") end, "EllesmereUI")
+    end
 end
 
 local function scanEllesmere()
@@ -95,7 +98,7 @@ local function scanEllesmereUnitFrames()
     end
 end
 
--- Blizzard player, target and focus frames (hidden while another addon replaces them, so skipped then).
+-- Blizzard player, target and focus frames.
 local BLIZZ_UNIT_FRAMES = { player = "PlayerFrame", target = "TargetFrame", focus = "FocusFrame" }
 
 local function blizzUnitHealthBar(frame, unit)
@@ -186,7 +189,7 @@ function ns.rescan()
     scanOUF()
 end
 
--- A new target or focus can carry your HoTs: redraw right away rather than on the next tick.
+-- A new target or focus may carry your HoTs.
 local unitEvents = CreateFrame("Frame")
 unitEvents:RegisterEvent("PLAYER_TARGET_CHANGED")
 unitEvents:RegisterEvent("PLAYER_FOCUS_CHANGED")
@@ -199,38 +202,61 @@ unitEvents:SetScript("OnEvent", function() ns.redraw() end)
 function ns.refreshLook()
     for _, o in pairs(ns.overlays) do o.block:ApplyLook() end
     if ns.onLookChanged then ns.onLookChanged() end
+    ns.updateTickerRate()
     ns.redraw()
 end
 
 -- Test mode: a sample block on every frame, a quarter of the bar, split 60/40 between two HoTs.
 local TEST_PARTS = { { name = "Regrowth", amount = 0.10 }, { name = "Rejuvenation", amount = 0.15 } }
 
+local function hideOverlay(o)
+    if o.visible then
+        o.block:Hide()
+        o.visible = false
+    end
+    o.serial = 0
+end
+
 function ns.redraw()
-    if not ns.db then return end
+    local db = ns.db
+    if not db then return end
+    local active = db.enabled and (ns.testMode or next(ns.hots) ~= nil)
+    local keys, results = {}, {}
     for bar, o in pairs(ns.overlays) do
-        local unit = o.getUnit()
-        local show = ns.db.enabled and isShownUnit(unit) and UnitExists(unit) and ns.barShown(bar)
-            and (not unit:find("^nameplate") or ns.db.nameplates)
-        if show and ns.testMode then
-            o.block:Set(1, 0, 0.25, TEST_PARTS)
-        elseif show then
-            local total, parts, serial = ns.remainingFor(unit)
-            if total > 0 then
-                local incoming = ns.db.afterIncoming and UnitGetIncomingHeals and UnitGetIncomingHeals(unit) or 0
-                o.block:Set(UnitHealthMax(unit), incoming, total, parts)
-                if serial > o.serial then o.block:Spark() end
-                o.serial = serial
-            else
-                o.block:Hide()
-                o.serial = 0
+        local unit, key
+        if active then unit = o.getUnit() end
+        if unit and isShownUnit(unit) and (db.nameplates or not unit:find("^nameplate")) then
+            key = keys[unit]
+            if key == nil then
+                key = UnitExists(unit) and ns.unitKey(unit) or false
+                keys[unit] = key
             end
-        else
-            o.block:Hide()
         end
+        local drawn = false
+        if key and (ns.testMode or ns.hots[key]) and ns.barShown(bar) then
+            if ns.testMode then
+                o.block:Set(1, 0, 0.25, TEST_PARTS)
+                drawn = true
+            else
+                local r = results[key]
+                if not r then
+                    local total, parts, serial = ns.remainingFor(unit, key)
+                    r = { total = total, parts = parts, serial = serial }
+                    results[key] = r
+                end
+                if r.total > 0 then
+                    local incoming = db.afterIncoming and UnitGetIncomingHeals and UnitGetIncomingHeals(unit) or 0
+                    o.block:Set(UnitHealthMax(unit), incoming, r.total, r.parts)
+                    if r.serial > o.serial then o.block:Spark() end
+                    o.serial = r.serial
+                    drawn = true
+                end
+            end
+        end
+        if drawn then o.visible = true else hideOverlay(o) end
     end
 end
 
--- A new HoT on someone: flash their block(s).
 function ns.onApplied(key)
     ns.redraw()
     for _, o in pairs(ns.overlays) do

@@ -1,51 +1,55 @@
 # DoesItLive
 
-A World of Warcraft: Forever addon that shows the healing your own HoTs still have to do, as a block on health bars, after current health and incoming heals. It's the HoT counterpart to [DoesItDie](https://github.com/swirllyman/DoesItDie), which does the same for DoTs.
+See at a glance how much healing your HoTs still have to do.
 
-## Features
+DoesItLive adds a block to health bars, right after current health and incoming heals, showing the healing your own heal-over-time spells will still land on that player. When the block reaches the end of the bar, your HoTs will top them off; when it falls short, they need more. It's the healer's counterpart to [DoesItDie](https://github.com/swirllyman/DoesItDie), which does the same for damage over time.
 
-- Tracks your Rejuvenation, Regrowth, Wild Growth, Renew and Riptide on group members, your target, focus and friendly nameplates.
-- Learns real tick sizes after each fight from the damage meter (includes +healing and talents).
-- DoesItDie's marker styles: fill textures, per-HoT colors, dashed or solid outline, glow, spark on each tick, flash on cast, healing-left text. Presets: Minimal, Classic, Juicy, Debug.
-- Options window with a live preview (`/dil`).
+Made for World of Warcraft: Forever.
 
-## Supported frames
+## Spells
 
-- EllesmereUI: raid, party, player, target, focus, nameplates
-- Blizzard: compact party/raid frames, default party frames, player, target, focus, nameplates
-- BetterBlizzFrames health bars
-- ElvUI and other oUF layouts
-- Nameplates: Platynator, Threat Plates, and an automatic search for others (Plater, KUI, ...)
+Rejuvenation, Regrowth, Wild Growth, Renew and Riptide, every rank.
+
+## Where the block shows
+
+- **EllesmereUI**: raid, party, player, target and focus frames, and nameplates
+- **Blizzard**: raid-style party and raid frames, the classic party frames, player, target and focus frames, and nameplates
+- **BetterBlizzFrames** health bars
+- **ElvUI** and other oUF-based layouts
+- **Nameplate addons**: Platynator, Threat Plates, and most others (Plater, KUI, ...) found automatically
+
+Blocks show on you, your group, your target and focus, and friendly nameplates.
+
+## Looks
+
+The options window (`/dil`) has a live preview, so you can see each change as you make it. Four presets get you started:
+
+- **Minimal**: a plain green block
+- **Classic**: health-bar texture, gold dashed outline, a spark on each tick, a flash when you cast
+- **Juicy**: striped, a color per spell, glowing pulsing outline
+- **Debug**: a color per spell, outlined, with the amount written on the bar
+
+You can also pick the fill style and color, show each HoT in its own color, add an outline, glow, spark or flash, show the amount as text, and choose whether the block steps down as each tick lands or shrinks smoothly.
 
 ## Commands
 
-| Command | |
-|---|---|
-| `/dil` | Options window |
+| Command | What it does |
+| --- | --- |
+| `/dil` | Open the options |
 | `/dil toggle` | Turn the blocks on or off |
-| `/dil test` | Sample blocks on every frame found |
-| `/dil probe` | What the game lets the addon read (run in and out of combat) |
-| `/dil learned` | Tick sizes learned from the damage meter |
-| `/dil forget` | Forget learned tick sizes |
-| `/dil debug` | Debug messages |
+| `/dil test` | Show sample blocks on every frame it found |
 
-## How it works on Forever
+## Accuracy and limitations
 
-Forever applies secret values to addons. Health, max health and incoming heals are secret, and reading auras in combat taints the addon. So:
+Crits are counted at their average. Turn off "Include average crits" to see only the healing you're sure of.
 
-- HoTs are tracked from your own cast events (`UNIT_SPELLCAST_SENT` names the target by full name, `UNIT_SPELLCAST_SUCCEEDED` gives the spell) and their tooltips.
-- Auras are read out of combat only, to correct expiry times and catch dispels.
-- The block is drawn with StatusBars fed the secret values, never doing math on them.
-
-## Development
-
-`tests/` has a smoke test that loads the addon against stubbed WoW APIs:
-
-```
-pip install lupa
-python tests/smoke.py
-```
+- Some changes to your healing during a fight may not be reflected.
+- In combat, the block of a HoT that ended early may occasionally keep showing for a while.
+- English game client only.
+- Health bars that fill right to left aren't supported.
+- Only your own HoTs are shown, not other healers'.
+- The game doesn't let addons touch friendly nameplates inside instances, so no blocks there.
 
 ## Credits
 
-Licensed under MIT (see `LICENSE`). Marker styles, textures, options window layout, nameplate support and damage meter learning are adapted from DoesItDie by Joe Greive (MIT, see `LICENSE-DoesItDie.txt`).
+MIT license (see `LICENSE`). Marker styles, textures, the options window layout and nameplate support are adapted from DoesItDie by Joe Greive (MIT, see `LICENSE-DoesItDie.txt`).

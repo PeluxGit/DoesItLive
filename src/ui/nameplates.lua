@@ -1,12 +1,8 @@
 local _, ns = ...
 
 -- HoT blocks on friendly nameplates. Finding a plate's health bar is ported from DoesItDie's Nameplates.lua
--- (Joe Greive, MIT, see LICENSE-DoesItDie.txt), which supports, in order:
---   EllesmereUI (its own pooled plate, bar at .health), Platynator (display frames reassigned between units),
---   Threat Plates (plate.TPFrame.visual.Healthbar), Blizzard's own bar, then an automatic search for other plate
---   addons (Plater, KUI, ...) that keep a StatusBar under a field named like "health".
--- Blocks are parented to the bar itself; each bar remembers which unit it's showing (barUnit), updated as plates
--- come and go, so reassigned bars (Platynator) follow their unit.
+-- (Joe Greive, MIT, see LICENSE-DoesItDie.txt). Each bar remembers the unit it shows (barUnit), so bars that
+-- move between units (Platynator) follow them.
 
 local issecret = issecretvalue or function() return false end
 

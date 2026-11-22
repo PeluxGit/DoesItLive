@@ -1,10 +1,8 @@
 local _, ns = ...
 
--- Saved settings and their defaults. Logic files only read ns.db; the options window writes it.
--- Look keys mirror DoesItDie's marker settings so its presets and styles carry over.
 ns.DEFAULTS = {
     enabled = true,
-    nameplates = true,         -- also on friendly nameplates (Blizzard's and nameplate addons')
+    nameplates = true,
 
     -- Block
     fillTexture = "flat",      -- see ns.FILL_STYLES
@@ -12,7 +10,7 @@ ns.DEFAULTS = {
     fillOpacity = 55,
     hotColors = "single",      -- single | spell | each
     segmentDividers = true,
-    drain = "ticks",           -- ticks: steps down as each tick lands; smooth: shrinks continuously
+    drain = "ticks",           -- ticks | smooth
 
     -- Outline and effects
     outlineStyle = "none",     -- dashed | solid | none
@@ -23,8 +21,8 @@ ns.DEFAULTS = {
     pulseOutline = false,
     showGlow = false,
     glowSize = 4,
-    showSpark = false,         -- flare on the block's end as each tick lands
-    flashOnApply = false,      -- flash the block when you cast a HoT
+    showSpark = false,
+    flashOnApply = false,
 
     -- Text
     showLabel = false,
@@ -33,39 +31,36 @@ ns.DEFAULTS = {
     labelColor = "white",
 
     -- Accuracy
-    afterIncoming = true,      -- start after the game's incoming heals (where EUI's green bar ends)
+    afterIncoming = true,      -- start where the game's incoming heals end
     scale = 100,               -- % multiplier on every estimate
-    useBonusHealing = true,    -- tooltip + (+healing x coefficient) until the meter has taught a size
-    learnFromMeter = true,     -- after each fight, learn real tick sizes from the damage meter
-    learned = {},              -- [spellID] = { tick = average healing per tick, weight = ticks seen }
+    includeCrits = true,
 
     debug = false,
 }
 
--- Presets only set appearance (as in DoesItDie).
+-- Presets only set appearance.
 ns.PRESETS = {
     { id = "minimal", label = "Minimal", values = {
         fillTexture = "flat", fillColor = "green", fillOpacity = 55, hotColors = "single",
         outlineStyle = "none", pulseOutline = false, showGlow = false, showSpark = false,
-        flashOnApply = false, showLabel = false, drain = "ticks",
+        flashOnApply = false, showLabel = false,
     } },
     { id = "classic", label = "Classic", values = {
         fillTexture = "smooth", fillColor = "green", fillOpacity = 60, hotColors = "single",
         outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "gold", outlineOpacity = 100,
         pulseOutline = false, showGlow = false, showSpark = true, flashOnApply = true, showLabel = false,
-        drain = "ticks",
     } },
     { id = "juicy", label = "Juicy", values = {
         fillTexture = "stripes", fillColor = "green", fillOpacity = 100, hotColors = "spell", segmentDividers = true,
         outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "green", outlineOpacity = 85,
         pulseOutline = true, showGlow = true, glowSize = 4, showSpark = true, flashOnApply = true,
-        showLabel = false, drain = "smooth",
+        showLabel = false,
     } },
     { id = "debug", label = "Debug", values = {
         fillTexture = "flat", fillOpacity = 60, hotColors = "spell", segmentDividers = true,
         outlineStyle = "solid", outlineThickness = 1, outlineColor = "white", outlineOpacity = 100,
         pulseOutline = false, showGlow = false, showSpark = false, flashOnApply = true,
-        showLabel = true, labelPosition = "right", labelSize = 9, labelColor = "white", drain = "ticks",
+        showLabel = true, labelPosition = "right", labelSize = 9, labelColor = "white",
     } },
 }
 
@@ -123,18 +118,23 @@ ns.LABEL_POSITIONS = {
 -- Seconds between HoT ticks when a spell has no override below.
 ns.DEFAULT_TICK = 3
 
+ns.CRIT_MULTIPLIER = 1.5
+
+-- Spell schools, as GetSpellCritChance numbers them.
+ns.SCHOOL_HOLY, ns.SCHOOL_NATURE = 2, 4
+
 -- Per-spell settings, keyed by English spell name (all ranks).
---   coef:   share of +healing the whole HoT gets, used until the damage meter teaches a real size. Guesses.
 --   tick:   tick interval in seconds.
 --   color:  "By spell" color.
 --   shape:  first and last tick relative to the average, for HoTs that front-load (straight line between).
 --   party:  lands on the target's whole party (subgroup in a raid).
+--   school: whose crit chance applies (a spell without one uses the highest of all schools).
 ns.SPELLS = {
-    ["Rejuvenation"] = { coef = 0.80, color = { 0.3, 1, 0.4 } },
-    ["Regrowth"]     = { coef = 0.50, color = { 0.2, 0.85, 0.75 } },
-    ["Wild Growth"]  = { coef = 0.40, tick = 1, party = true, shape = { 1.3, 0.7 }, color = { 0.75, 1, 0.3 } },
-    ["Renew"]        = { coef = 1.00, color = { 1, 0.95, 0.6 } },
-    ["Riptide"]      = { coef = 0.50, color = { 0.3, 0.6, 1 } },
+    ["Rejuvenation"] = { school = ns.SCHOOL_NATURE, color = { 0.3, 1, 0.4 } },
+    ["Regrowth"]     = { school = ns.SCHOOL_NATURE, color = { 0.2, 0.85, 0.75 } },
+    ["Wild Growth"]  = { school = ns.SCHOOL_NATURE, tick = 1, party = true, shape = { 1.3, 0.7 }, color = { 0.75, 1, 0.3 } },
+    ["Renew"]        = { school = ns.SCHOOL_HOLY, color = { 1, 0.95, 0.6 } },
+    ["Riptide"]      = { school = ns.SCHOOL_NATURE, color = { 0.3, 0.6, 1 } },
 }
 
 -- "Different color per HoT": each spell keeps the palette color it got first this session.
@@ -142,5 +142,13 @@ ns.HOT_PALETTE = {
     { 0.3, 1, 0.45 }, { 0.3, 0.75, 1 }, { 1, 0.8, 0.2 }, { 0.85, 0.4, 1 }, { 1, 0.45, 0.75 },
 }
 
-ns.REFRESH = 0.05  -- redraw interval while any HoT is running, seconds
-ns.RESCAN = 1.0    -- how often frame adapters look for unit buttons, seconds
+-- Redraw interval while any HoT is running, seconds.
+ns.REFRESH_TICKS = 0.1
+ns.REFRESH_SMOOTH = 0.05
+ns.RESCAN = 5.0      -- seconds between periodic looks for new unit buttons
+ns.AURA_RESCAN = 0.5 -- out of combat, seconds between aura reads per unit
+
+-- Tick matching, seconds.
+ns.TICK_WINDOW = 0.4       -- a heal this close to a HoT's due tick counts as that tick
+ns.TICK_SYNC_WINDOW = 0.2  -- a match this close moves the HoT's timing onto the real tick
+ns.TICK_MISS_AFTER = 0.6   -- no heal this long after a due tick: the HoT is gone (once one of its ticks was seen)

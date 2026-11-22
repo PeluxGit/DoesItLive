@@ -1,12 +1,7 @@
 local addonName, ns = ...
 
--- DoesItLive options window (/dil).
---
--- Left: a live preview, a mock raid frame carrying a real HoT block (Display.lua) fed plain numbers.
--- Right: tabbed settings. Top: presets.
--- Window, controls and presets follow DoesItDie's options window by Joe Greive (MIT, see
--- LICENSE-DoesItDie.txt): basic widgets (CheckButton, Slider, Button) rather than Blizzard templates, so
--- they don't depend on templates behaving the same in Forever. Settings are written straight to ns.db.
+-- Options window (/dil): a live preview on the left, tabbed settings on the right, presets on top.
+-- Window and controls follow DoesItDie's options window by Joe Greive (MIT, see LICENSE-DoesItDie.txt).
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local WINDOW_WIDTH, WINDOW_HEIGHT = 720, 470
@@ -277,21 +272,6 @@ local function actionRow(parent, labelText, buttonText, onClick, opts)
     return row
 end
 
--- A block of text that fills the rest of the tab (the learned sizes list).
-local function textBlock(parent, getText, height)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(SETTINGS_LAYOUT.label + SETTINGS_LAYOUT.control + 50, height)
-    local text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    text:SetPoint("TOPLEFT", 6, -2)
-    text:SetPoint("RIGHT", -6, 0)
-    text:SetJustifyH("LEFT")
-    text:SetJustifyV("TOP")
-    text:SetSpacing(3)
-    function row:Refresh() text:SetText(getText()) end
-    table.insert(controls, row)
-    return row
-end
-
 ---------------------------------------------------------------------------
 -- Tabs
 ---------------------------------------------------------------------------
@@ -344,7 +324,6 @@ local function addTab(name)
     function tab:slider(key, ...) return place(slider(self.content, key, ...), key) end
     function tab:choice(key, ...) return place(choice(self.content, key, ...), key) end
     function tab:action(...) return place(actionRow(self.content, ...)) end
-    function tab:text(...) return place(textBlock(self.content, ...)) end
     function tab:gap() self.y = self.y + 8 end
 
     table.insert(tabs, tab)
@@ -360,20 +339,6 @@ local function applyPreset(preset)
     for key, value in pairs(preset.values) do db()[key] = value end
     changed()
     say(preset.label .. " preset applied.")
-end
-
-local function learnedText()
-    local lines = {}
-    for spellID, l in pairs(db().learned) do
-        lines[#lines + 1] = ("%s (%d): |cffffffff%.1f|r per tick, tooltip %.1f, from %d ticks"):format(
-            l.name or "?", spellID, l.tick or 0, l.desc or 0, math.floor((l.weight or 0) + 0.5))
-    end
-    table.sort(lines)
-    if #lines == 0 then
-        return "Nothing learned yet. After each fight with your HoTs, the damage meter's healing totals teach "
-            .. "the real tick sizes (turn debug on to see each step)."
-    end
-    return "Learned from the damage meter:\n" .. table.concat(lines, "\n")
 end
 
 local function hasOutline(s) return s.outlineStyle ~= "none" end
@@ -422,17 +387,12 @@ local function buildTabs()
             .. "don't overlap." })
     accuracy:slider("scale", "Scale estimates", 50, 200, 5, { suffix = "%",
         tooltip = "Multiplies every estimate. Applies to new casts." })
-    accuracy:checkbox("learnFromMeter", "Learn from the damage meter", {
-        tooltip = "After each fight, compares your HoTs' healing on the damage meter with the ticks counted, and "
-            .. "saves the real tick size. Fights with overhealing are skipped." })
-    accuracy:checkbox("useBonusHealing", "Add +healing until learned", {
-        tooltip = "Tooltips leave out +healing. Until a spell is learned, adds +healing x a rough coefficient." })
-    accuracy:gap()
-    accuracy:text(learnedText, 120)
-    accuracy:action("", "Forget learned sizes", function() ns.forgetLearned() refreshControls() end)
+    accuracy:checkbox("includeCrits", "Include average crits", {
+        tooltip = "Adds the extra healing your crits bring on average, from your crit chance out of combat "
+            .. "(changes during a fight aren't seen). Off: only the healing you're sure of. Applies to new casts." })
 
     local general = addTab("General")
-    general:checkbox("debug", "Debug messages", { tooltip = "Prints each cast, parse and learning step in chat." })
+    general:checkbox("debug", "Debug messages", { tooltip = "Prints each cast, parse and tick in chat." })
     general:action("Test on your frames", "Toggle test blocks", function() SlashCmdList.DOESITLIVE("test") end)
     general:action("What the game allows", "Run probe", function() SlashCmdList.DOESITLIVE("probe") end)
 end
@@ -442,7 +402,6 @@ local function buildPreview(pane)
     title:SetPoint("TOPLEFT", 12, -12)
     title:SetText("Preview")
 
-    -- A mock raid frame: dark background, class-colored health, the game's incoming heal, and the block.
     local mock = CreateFrame("Frame", nil, pane, "BackdropTemplate")
     mock:SetSize(150, 46)
     mock:SetPoint("TOP", pane, "TOP", 0, -50)
@@ -570,10 +529,6 @@ function ns.openOptions()
     if not ns.db then return end
     if not window then createWindow() end
     window:SetShown(not window:IsShown())
-end
-
-function ns.onLearned()
-    if window and window:IsShown() then refreshControls() end
 end
 
 -- Options > AddOns > DoesItLive: a short page with a button that opens the window.

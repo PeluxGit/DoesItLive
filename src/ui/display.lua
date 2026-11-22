@@ -1,8 +1,6 @@
 local addonName, ns = ...
 
--- The HoT block drawn on one health bar, in DoesItDie's marker styles: fill (flat, textures, stripes, fade),
--- per-HoT segments, dashed or solid outline, glow, a spark as each tick lands, a flash on cast, and text.
--- Built the same way for real frames (Frames.lua) and the options window's mock frame.
+-- The HoT block drawn on one health bar.
 --
 -- Geometry, all without math on secret values (StatusBars accept them):
 --   inc    starts at the health fill's right edge, filled to the game's incoming heals, invisible;
@@ -13,6 +11,7 @@ local addonName, ns = ...
 -- A clip frame on the health bar cuts off whatever runs past full health.
 -- Textures and the drawing approach are from DoesItDie by Joe Greive (MIT, see LICENSE-DoesItDie.txt).
 
+local issecret = issecretvalue or function() return false end
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local TEXTURE_DIR = "Interface\\AddOns\\" .. addonName .. "\\Textures\\"
 local MAX_SEGMENTS = 5
@@ -152,7 +151,7 @@ function ns.createBlock(bar)
     local pulse = b.outlinePulse:CreateAnimation("Alpha")
     pulse:SetFromAlpha(1) pulse:SetToAlpha(0.3) pulse:SetDuration(0.9) pulse:SetSmoothing("IN_OUT")
 
-    -- Glow: soft halo in the outline color, inside the bar (the clip frame cuts anything outside).
+    -- Glow: drawn inside the edges, since the clip frame cuts anything outside.
     b.glows = {}
     for _, side in ipairs({ "top", "bottom", "left", "right" }) do
         local tex = b.outlineLayer:CreateTexture(nil, "BORDER")
@@ -170,7 +169,7 @@ function ns.createBlock(bar)
         b.glows[#b.glows + 1] = { texture = tex, side = side }
     end
 
-    -- Spark: a flare on the block's end, only as a tick lands.
+    -- Spark
     b.sparkLayer = CreateFrame("Frame", nil, b.total)
     b.sparkLayer:SetAllPoints(b.total)
     b.spark = b.sparkLayer:CreateTexture(nil, "OVERLAY")
@@ -202,11 +201,23 @@ function ns.createBlock(bar)
     return b
 end
 
+-- The bar's width can be secret (Blizzard's compact party frames): then it's never compared, only handed to
+-- SetWidth, falling back to the last plain width if SetWidth won't take it.
 function Block:Layout()
     local w = self.bar:GetWidth()
-    if not w or w <= 0 then return end
-    self.inc:SetWidth(w)
-    self.total:SetWidth(w)
+    if w == nil then return end
+    if issecret(w) then
+        local ok = pcall(self.inc.SetWidth, self.inc, w) and pcall(self.total.SetWidth, self.total, w)
+        if not ok and self.width then
+            self.inc:SetWidth(self.width)
+            self.total:SetWidth(self.width)
+        end
+    else
+        if w <= 0 then return end
+        self.width = w
+        self.inc:SetWidth(w)
+        self.total:SetWidth(w)
+    end
     self.total:ClearAllPoints()
     local from = ns.db.afterIncoming and self.inc:GetStatusBarTexture() or self.bar:GetStatusBarTexture()
     self.total:SetPoint("TOPLEFT", from, "TOPRIGHT")
@@ -215,6 +226,7 @@ end
 
 function Block:ApplyLook()
     local db = ns.db
+    self.last = {}
     local fill = FILL_PATHS[db.fillTexture] or FILL_PATHS.flat
     local perHot = db.hotColors ~= "single"
 
@@ -235,7 +247,7 @@ function Block:ApplyLook()
         self.fillTex:Hide()
     end
 
-    -- Segments (per-HoT colors): the fill style's texture, flat if it has none or fades.
+    -- Segments
     local segPath = (fill.path and not fill.gradient) and fill.path or WHITE
     for _, seg in ipairs(self.segments) do
         seg.texture:SetTexture(segPath, fill.tiled and "REPEAT" or nil, fill.tiled and "REPEAT" or nil)
@@ -264,10 +276,14 @@ function Block:ApplyLook()
     if db.pulseOutline and db.outlineStyle ~= "none" then self.outlinePulse:Play() else self.outlinePulse:Stop() end
 
     -- Glow
-    local inner, outer = CreateColor(or_, og, ob, oa * 0.7), CreateColor(or_, og, ob, 0)
+    local inner, outer
+    if CreateColor then inner, outer = CreateColor(or_, og, ob, oa * 0.7), CreateColor(or_, og, ob, 0) end
     for _, glow in ipairs(self.glows) do
         local tex = glow.texture
-        if glow.side == "top" then
+        if not inner then
+            tex:SetVertexColor(or_, og, ob, oa * 0.35)
+            if glow.side == "top" or glow.side == "bottom" then tex:SetHeight(db.glowSize) else tex:SetWidth(db.glowSize) end
+        elseif glow.side == "top" then
             tex:SetHeight(db.glowSize) tex:SetGradient("VERTICAL", outer, inner)
         elseif glow.side == "bottom" then
             tex:SetHeight(db.glowSize) tex:SetGradient("VERTICAL", inner, outer)
@@ -279,7 +295,7 @@ function Block:ApplyLook()
         tex:SetShown(db.showGlow)
     end
 
-    -- Spark, in the outline color brightened
+    -- Spark
     self.spark:SetVertexColor(math.min(1, or_ + 0.4), math.min(1, og + 0.4), math.min(1, ob + 0.4), 1)
     self.sparkLayer:SetShown(db.showSpark)
 
@@ -303,35 +319,54 @@ local function short(n)
     return ("+%d"):format(math.floor(n + 0.5))
 end
 
--- max: the unit's max health (may be secret). incoming: game's incoming heals (may be secret).
--- total, parts: plain numbers from ns.remainingFor.
+-- max, incoming: may be secret, so they're set every time. total, parts: plain numbers from ns.remainingFor,
+-- set only when they change (self.last, cleared by ApplyLook and Hide).
 function Block:Set(max, incoming, total, parts)
     local db = ns.db
+    local last = self.last
     self.inc:SetMinMaxValues(0, max)
     self.inc:SetValue(incoming or 0)
     self.total:SetMinMaxValues(0, max)
-    self.total:SetValue(total)
+    if last.total ~= total then
+        self.total:SetValue(total)
+        last.total = total
+    end
     if db.hotColors ~= "single" and parts and #parts > 0 then
         local running = 0
+        local _, _, _, alpha = colorOf(db.fillColor, db.fillOpacity)
+        last.segments = last.segments or {}
         for i, seg in ipairs(self.segments) do
             local part = parts[i]
-            if part and i <= MAX_SEGMENTS then
+            local was = last.segments[i]
+            if part then
                 running = running + part.amount
+                local value = i == MAX_SEGMENTS and total or running
+                local divider = db.segmentDividers and parts[i + 1] ~= nil
                 seg.bar:SetMinMaxValues(0, max)
-                seg.bar:SetValue(i == MAX_SEGMENTS and total or running)
-                local c = hotColor(part.name)
-                local _, _, _, a = colorOf(db.fillColor, db.fillOpacity)
-                seg.texture:SetVertexColor(c[1], c[2], c[3], a)
-                seg.texture:Show()
-                seg.divider:SetShown(db.segmentDividers and parts[i + 1] ~= nil)
-            else
+                if not was or was.value ~= value then seg.bar:SetValue(value) end
+                if not was or was.name ~= part.name then
+                    local c = hotColor(part.name)
+                    seg.texture:SetVertexColor(c[1], c[2], c[3], alpha)
+                    seg.texture:Show()
+                end
+                if not was or was.divider ~= divider then seg.divider:SetShown(divider) end
+                last.segments[i] = { value = value, name = part.name, divider = divider }
+            elseif was ~= false then
                 seg.texture:Hide()
                 seg.divider:Hide()
+                last.segments[i] = false
             end
         end
     end
-    self.label:SetText(short(total))
-    self.label:SetShown(db.showLabel)
+    local text = short(total)
+    if last.text ~= text then
+        self.label:SetText(text)
+        last.text = text
+    end
+    if last.labelShown ~= db.showLabel then
+        self.label:SetShown(db.showLabel)
+        last.labelShown = db.showLabel
+    end
     if not self.clip:IsShown() then
         self.clip:Show()
     end
@@ -340,6 +375,7 @@ end
 function Block:Hide()
     self.clip:Hide()
     self.label:Hide()
+    self.last = {}
 end
 
 function Block:IsShown() return self.clip:IsShown() end
