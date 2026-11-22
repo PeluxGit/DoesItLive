@@ -8,17 +8,17 @@ Made for World of Warcraft: Forever.
 
 ## Spells
 
-Rejuvenation, Regrowth, Wild Growth, Renew and Riptide, every rank.
+Rejuvenation and Regrowth, every rank. Wild Growth, Renew and Riptide (untested).
 
 ## Where the block shows
 
-- **EllesmereUI**: raid, party, player, target and focus frames, and nameplates
-- **Blizzard**: raid-style party and raid frames, the classic party frames, player, target and focus frames, and nameplates
-- **BetterBlizzFrames** health bars
-- **ElvUI** and other oUF-based layouts
-- **Nameplate addons**: Platynator, Threat Plates, and most others (Plater, KUI, ...) found automatically
+- **EllesmereUI**: raid, party, player, target and focus frames; nameplates (untested)
+- **Blizzard**: raid-style party and raid frames, the classic party frames, player, target and focus frames, and nameplates (untested)
+- **BetterBlizzFrames** health bars (untested)
+- **ElvUI** and other oUF-based layouts (untested)
+- **Nameplate addons**: Platynator, Threat Plates, and most others (Plater, KUI, ...) found automatically (untested)
 
-Blocks show on you, your group, your target and focus, and friendly nameplates.
+Blocks show on you, your group (untested), your target and focus, and friendly nameplates.
 
 ## Looks
 

@@ -262,9 +262,6 @@ local HELP = {
     "/dil - options window",
     "/dil toggle - turn the blocks on or off",
     "/dil test - sample blocks on every frame found",
-    "/dil probe - what the game lets the addon read (run in and out of combat)",
-    "/dil perf - CPU use from the game's addon profiler",
-    "/dil debug - toggle debug messages",
 }
 
 SLASH_DOESITLIVE1 = "/dil"

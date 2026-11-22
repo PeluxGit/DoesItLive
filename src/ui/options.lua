@@ -392,9 +392,7 @@ local function buildTabs()
             .. "(changes during a fight aren't seen). Off: only the healing you're sure of. Applies to new casts." })
 
     local general = addTab("General")
-    general:checkbox("debug", "Debug messages", { tooltip = "Prints each cast, parse and tick in chat." })
     general:action("Test on your frames", "Toggle test blocks", function() SlashCmdList.DOESITLIVE("test") end)
-    general:action("What the game allows", "Run probe", function() SlashCmdList.DOESITLIVE("probe") end)
 end
 
 local function buildPreview(pane)

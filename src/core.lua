@@ -292,6 +292,7 @@ function ns.onCastSucceeded(castGUID, spellID)
     if castGUID then pendingTarget[castGUID] = nil end
     local info = hotInfo(spellID)
     if not info then return end
+    trace(("%s cast, SENT named '%s'"):format(info.name, tostring(targetName)))
     local now = GetTime()
     local unit = resolveCastUnit(targetName)
     if not unit then return end
@@ -544,9 +545,6 @@ events:SetScript("OnEvent", function(_, event, ...)
         if ... ~= addonName then return end
         DoesItLiveDB = DoesItLiveDB or {}
         local db = DoesItLiveDB
-        -- Settings from older versions.
-        if type(db.scale) == "number" and db.scale < 10 then db.scale = math.floor(db.scale * 100 + 0.5) end
-        db.color, db.useBonusHealing, db.learnFromMeter, db.learned = nil, nil, nil, nil
         for k, v in pairs(ns.DEFAULTS) do
             if db[k] == nil then db[k] = copyDefault(v) end
         end
