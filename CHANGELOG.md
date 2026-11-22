@@ -2,7 +2,7 @@
 
 All notable changes to this addon are documented here, following [Keep a Changelog](https://keepachangelog.com/) conventions.
 
-## [Unreleased]
+## [2026-11-22]
 
 First release.
 
