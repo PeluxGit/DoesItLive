@@ -78,15 +78,23 @@ local function makeRow(parent, labelText, opts)
     row.label:SetJustifyH("LEFT")
     row.label:SetText(labelText)
     row.enabledIf = opts.enabledIf
+    local function showTooltip()
+        GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+        GameTooltip:SetText(labelText, 1, 1, 1)
+        GameTooltip:AddLine(opts.tooltip, nil, nil, nil, true)
+        GameTooltip:Show()
+    end
+    local function hideTooltip() GameTooltip:Hide() end
     if opts.tooltip then
         row:EnableMouse(true)
-        row:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(labelText, 1, 1, 1)
-            GameTooltip:AddLine(opts.tooltip, nil, nil, nil, true)
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnEnter", showTooltip)
+        row:SetScript("OnLeave", hideTooltip)
+    end
+    -- The control takes the mouse from the row, so it shows the row's tooltip too.
+    function row:Watch(widget)
+        if not opts.tooltip then return end
+        widget:HookScript("OnEnter", showTooltip)
+        widget:HookScript("OnLeave", hideTooltip)
     end
     function row:ApplyEnabled(widget)
         local enabled = not self.enabledIf or self.enabledIf(db())
@@ -108,6 +116,7 @@ local function checkbox(parent, key, labelText, opts)
     box:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
     box:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
     box:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    row:Watch(box)
     box:SetScript("OnClick", function(self)
         db()[key] = self:GetChecked() and true or false
         changed()
@@ -129,6 +138,7 @@ local function sliderRow(parent, labelText, min, max, step, get, set, opts)
     slider:SetMinMaxValues(min, max)
     slider:SetValueStep(step)
     slider:SetObeyStepOnDrag(true)
+    row:Watch(slider)
     local trackTex = slider:CreateTexture(nil, "BACKGROUND")
     trackTex:SetColorTexture(0.3, 0.3, 0.32, 1)
     trackTex:SetHeight(4)
@@ -225,6 +235,7 @@ local function choice(parent, key, labelText, list, opts)
     button:SetSize(row.layout.control, 22)
     button:SetPoint("LEFT", row, "LEFT", row.layout.label, 0)
     setBackdrop(button, 0.13)
+    row:Watch(button)
     local highlight = button:CreateTexture(nil, "HIGHLIGHT")
     highlight:SetAllPoints()
     highlight:SetColorTexture(1, 1, 1, 0.06)
@@ -268,6 +279,7 @@ local function actionRow(parent, labelText, buttonText, onClick, opts)
     local row = makeRow(parent, labelText, opts)
     local button = pushButton(row, buttonText, row.layout.control, onClick)
     button:SetPoint("LEFT", row, "LEFT", row.layout.label, 0)
+    row:Watch(button)
     function row:Refresh() self:ApplyEnabled(button) end
     return row
 end
@@ -383,8 +395,7 @@ local function buildTabs()
 
     local accuracy = addTab("Accuracy")
     accuracy:checkbox("afterIncoming", "Start after incoming heals", {
-        tooltip = "Starts the block where the game's incoming-heal bar ends (EllesmereUI's green bar), so the two "
-            .. "don't overlap." })
+        tooltip = "Starts the block where your frames' incoming-heal bar ends, so the two don't overlap." })
     accuracy:slider("scale", "Scale estimates", 50, 200, 5, { suffix = "%",
         tooltip = "Multiplies every estimate. Applies to new casts." })
     accuracy:checkbox("includeCrits", "Include average crits", {
