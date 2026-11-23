@@ -2,6 +2,13 @@
 
 All notable changes to this addon are documented here, following [Keep a Changelog](https://keepachangelog.com/) conventions.
 
+## [Unreleased]
+
+### Fixed
+
+- EllesmereUI frames could show a second block on the power bar.
+- With high latency, the block of a HoT cast in combat could stay out of step with its ticks.
+
 ## [2026-11-22]
 
 First release.

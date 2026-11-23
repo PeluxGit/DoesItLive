@@ -58,16 +58,16 @@ local function euiHealthBar(button)
     return best, bestH
 end
 
--- Each button's health bar, kept once it has a height (before layout, the power bar can look as tall).
+-- Each button's health bar. Before layout every bar is 0 tall and the power bar could be picked, so a button
+-- isn't tracked until its bars have a height.
 local euiBars = setmetatable({}, { __mode = "k" })
 
 local function euiButton(button)
     if euiBars[button] then return end
     local bar, height = euiHealthBar(button)
-    if bar then
-        if height > 0 then euiBars[button] = bar end
-        track(bar, function() return button:GetAttribute("unit") end, "EllesmereUI")
-    end
+    if not bar or height <= 0 then return end
+    euiBars[button] = bar
+    track(bar, function() return button:GetAttribute("unit") end, "EllesmereUI")
 end
 
 local function scanEllesmere()

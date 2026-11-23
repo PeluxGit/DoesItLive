@@ -407,10 +407,12 @@ function ns.onHeal(unit)
         end
     end
     if not best then return end
+    -- A cast's first tick can be off by latency, so it syncs within the full window.
+    local syncWindow = best.seen == 0 and window or ns.TICK_SYNC_WINDOW
+    local synced = math.abs(bestOff) <= syncWindow and not best.auraSeen
     best.nextTick, best.seen = bestK + 1, best.seen + 1
     -- Target and focus can change, so only HoTs heard through group tokens are judged for missed ticks.
     best.heardInGroup = group
-    local synced = math.abs(bestOff) <= ns.TICK_SYNC_WINDOW and not best.auraSeen
     if synced then best.expires = best.expires + bestOff end
     trace(("TICK %s on %s (%d/%d, %+.2fs%s)"):format(bestName, key, bestK, best.ticks, bestOff,
         synced and ", synced" or ""))
