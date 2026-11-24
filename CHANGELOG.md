@@ -8,6 +8,7 @@ All notable changes to this addon are documented here, following [Keep a Changel
 
 - EllesmereUI frames could show a second block on the power bar.
 - With high latency, the block of a HoT cast in combat could stay out of step with its ticks.
+- On a druid's EllesmereUI player frame, out of Cat Form, the block now covers the full height of the health bar.
 
 ## [2026-11-22]
 

@@ -201,9 +201,21 @@ function ns.createBlock(bar)
     return b
 end
 
+-- EllesmereUI's druid player frame: out of Cat Form, a second health bar (health._euiStrip) fills the combo
+-- point row above the health bar. The block covers it too.
+local function stripHeight(bar)
+    local strip = bar._euiStrip
+    if type(strip) ~= "table" or type(strip.IsShown) ~= "function" or not strip:IsShown() then return 0 end
+    local h = strip:GetHeight()
+    if type(h) ~= "number" or issecret(h) or h <= 0 then return 0 end
+    return h
+end
+
 -- The bar's width can be secret (Blizzard's compact party frames): then it's never compared, only handed to
 -- SetWidth, falling back to the last plain width if SetWidth won't take it.
 function Block:Layout()
+    local up = stripHeight(self.bar)
+    self.up = up
     local w = self.bar:GetWidth()
     if w == nil then return end
     if issecret(w) then
@@ -218,9 +230,12 @@ function Block:Layout()
         self.inc:SetWidth(w)
         self.total:SetWidth(w)
     end
+    self.clip:ClearAllPoints()
+    self.clip:SetPoint("TOPLEFT", self.bar, "TOPLEFT", 0, up)
+    self.clip:SetPoint("BOTTOMRIGHT", self.bar, "BOTTOMRIGHT")
     self.total:ClearAllPoints()
     local from = ns.db.afterIncoming and self.inc:GetStatusBarTexture() or self.bar:GetStatusBarTexture()
-    self.total:SetPoint("TOPLEFT", from, "TOPRIGHT")
+    self.total:SetPoint("TOPLEFT", from, "TOPRIGHT", 0, up)
     self.total:SetPoint("BOTTOMLEFT", from, "BOTTOMRIGHT")
 end
 
@@ -324,6 +339,7 @@ end
 function Block:Set(max, incoming, total, parts)
     local db = ns.db
     local last = self.last
+    if stripHeight(self.bar) ~= self.up then self:Layout() end
     self.inc:SetMinMaxValues(0, max)
     self.inc:SetValue(incoming or 0)
     self.total:SetMinMaxValues(0, max)
