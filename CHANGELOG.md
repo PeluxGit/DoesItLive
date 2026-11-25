@@ -2,6 +2,12 @@
 
 All notable changes to this addon are documented here, following [Keep a Changelog](https://keepachangelog.com/) conventions.
 
+## [Unreleased]
+
+### Removed
+
+- The General tab of the options window, with its "Toggle test blocks" button, and `/dil test` from the command list.
+
 ## [2026-11-24]
 
 ### Fixed

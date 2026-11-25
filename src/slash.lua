@@ -261,7 +261,6 @@ end
 local HELP = {
     "/dil - options window",
     "/dil toggle - turn the blocks on or off",
-    "/dil test - sample blocks on every frame found",
 }
 
 SLASH_DOESITLIVE1 = "/dil"

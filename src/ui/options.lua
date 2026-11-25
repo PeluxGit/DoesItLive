@@ -274,16 +274,6 @@ local function pushButton(parent, text, width, onClick)
     return button
 end
 
-local function actionRow(parent, labelText, buttonText, onClick, opts)
-    opts = opts or {}
-    local row = makeRow(parent, labelText, opts)
-    local button = pushButton(row, buttonText, row.layout.control, onClick)
-    button:SetPoint("LEFT", row, "LEFT", row.layout.label, 0)
-    row:Watch(button)
-    function row:Refresh() self:ApplyEnabled(button) end
-    return row
-end
-
 ---------------------------------------------------------------------------
 -- Tabs
 ---------------------------------------------------------------------------
@@ -335,7 +325,6 @@ local function addTab(name)
     function tab:checkbox(key, ...) return place(checkbox(self.content, key, ...), key) end
     function tab:slider(key, ...) return place(slider(self.content, key, ...), key) end
     function tab:choice(key, ...) return place(choice(self.content, key, ...), key) end
-    function tab:action(...) return place(actionRow(self.content, ...)) end
     function tab:gap() self.y = self.y + 8 end
 
     table.insert(tabs, tab)
@@ -401,9 +390,6 @@ local function buildTabs()
     accuracy:checkbox("includeCrits", "Include average crits", {
         tooltip = "Adds the extra healing your crits bring on average, from your crit chance out of combat "
             .. "(changes during a fight aren't seen). Off: only the healing you're sure of. Applies to new casts." })
-
-    local general = addTab("General")
-    general:action("Test on your frames", "Toggle test blocks", function() SlashCmdList.DOESITLIVE("test") end)
 end
 
 local function buildPreview(pane)

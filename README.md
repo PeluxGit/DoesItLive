@@ -37,7 +37,6 @@ You can also pick the fill style and color, show each HoT in its own color, add 
 | --- | --- |
 | `/dil` | Open the options |
 | `/dil toggle` | Turn the blocks on or off |
-| `/dil test` | Show sample blocks on every frame it found |
 
 ## Accuracy and limitations
 
